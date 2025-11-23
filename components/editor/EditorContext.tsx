@@ -1,0 +1,218 @@
+"use client";
+
+import React, { createContext, useContext, useReducer, ReactNode } from 'react';
+import { Clip, EditorState, TrackType, EditorAction } from './types';
+
+type Action = EditorAction;
+
+const initialState: EditorState = {
+    currentTime: 0,
+    duration: 40, // 10 clips * 4s
+    isPlaying: false,
+    selectedClipId: null,
+    zoom: 50, // 50px per second
+    clips: [
+        {
+            id: 'sub-1',
+            trackId: 'subtitle',
+            startTime: 0,
+            duration: 5,
+            originalDuration: 10,
+            content: '傍晚客厅，窗帘半拉，夕阳透过缝隙洒在沙发上，猫咪蜷缩在沙发角落在打盹...'
+        },
+        {
+            id: 'sub-2',
+            trackId: 'subtitle',
+            startTime: 5,
+            duration: 5,
+            originalDuration: 10,
+            content: '傍晚客厅，窗帘半拉，夕阳透过缝隙洒在沙发上，猫咪蜷缩在沙发角落在打盹...'
+        },
+        // Generate video clips from imported files with Istanbul history prompts
+        ...Array.from({ length: 10 }).map((_, i) => {
+            const prompts = [
+                "清晨的伊斯坦布尔，蓝色清真寺在晨雾中若隐若现，海鸥在博斯普鲁斯海峡上空盘旋。",
+                "圣索菲亚大教堂宏伟的穹顶，阳光透过彩色玻璃窗洒在古老的大理石地面上。",
+                "热闹的大巴扎集市，五颜六色的香料堆积如山，精美的土耳其地毯挂满墙壁。",
+                "加拉塔大桥上垂钓的人们，远处是金角湾的波光粼粼和城市的剪影。",
+                "地下水宫幽暗神秘的氛围，巨大的石柱倒映在水中，美杜莎头像静静注视。",
+                "托普卡帕宫的庭院，郁金香盛开，远处可以眺望到马尔马拉海的壮丽景色。",
+                "独立大街上红色的复古电车缓缓驶过，两旁是熙熙攘攘的人群和欧式建筑。",
+                "博斯普鲁斯海峡上的游船，连接欧亚两洲的跨海大桥在夕阳下熠熠生辉。",
+                "古老的城墙遗址，见证了拜占庭和奥斯曼帝国的兴衰，爬山虎在墙缝中生长。",
+                "夜晚的伊斯坦布尔，灯火辉煌，清真寺的宣礼塔在夜空中轮廓分明。"
+            ];
+            return {
+                id: `vid-${i + 1}`,
+                trackId: 'video' as const,
+                startTime: i * 4, // 4 seconds each
+                duration: 4,
+                originalDuration: 10, // Assume 10s source
+                content: `/videos/${i + 1}.mp4`,
+                prompt: prompts[i]
+            };
+        })
+    ]
+};
+
+function editorReducer(state: EditorState, action: Action): EditorState {
+    switch (action.type) {
+        case 'SET_TIME':
+            return { ...state, currentTime: Math.max(0, Math.min(action.payload, state.duration)) };
+        case 'TOGGLE_PLAY':
+            return { ...state, isPlaying: !state.isPlaying };
+        case 'SELECT_CLIP':
+            return { ...state, selectedClipId: action.payload };
+        case 'UPDATE_CLIP': {
+            const { id, changes } = action.payload;
+            const clipIndex = state.clips.findIndex(c => c.id === id);
+            if (clipIndex === -1) return state;
+
+            const oldClip = state.clips[clipIndex];
+            const updatedClip = { ...oldClip, ...changes };
+
+            // Create a new clips array
+            let newClips = [...state.clips];
+            newClips[clipIndex] = updatedClip;
+
+            // Ripple Logic (Collision-based)
+            // Only trigger if duration changed
+            if (changes.duration !== undefined && changes.duration !== oldClip.duration) {
+                const durationDelta = changes.duration - oldClip.duration;
+
+                // Only ripple if extending (delta > 0)
+                if (durationDelta > 0) {
+                    // Sort clips by startTime to process in order
+                    const trackClips = newClips
+                        .filter(c => c.trackId === updatedClip.trackId && c.id !== updatedClip.id && c.startTime >= updatedClip.startTime)
+                        .sort((a, b) => a.startTime - b.startTime);
+
+                    let currentEndTime = updatedClip.startTime + updatedClip.duration;
+
+                    for (const nextClip of trackClips) {
+                        // If overlap (or touching if we want strict no-gap, but usually overlap)
+                        // Using a small epsilon for float comparison safety if needed, but strict > is usually fine
+                        if (currentEndTime > nextClip.startTime) {
+                            // Shift this clip
+                            const shift = currentEndTime - nextClip.startTime;
+                            const nextClipIndex = newClips.findIndex(c => c.id === nextClip.id);
+                            if (nextClipIndex !== -1) {
+                                newClips[nextClipIndex] = {
+                                    ...newClips[nextClipIndex],
+                                    startTime: newClips[nextClipIndex].startTime + shift
+                                };
+                                // Update currentEndTime for the next iteration
+                                currentEndTime = newClips[nextClipIndex].startTime + newClips[nextClipIndex].duration;
+                            }
+                        } else {
+                            // If no overlap with this one, and since they are sorted, 
+                            // we might stop? No, because a later clip might have been pushed by this one?
+                            // Actually, if we don't touch this one, we don't push it, so we don't push subsequent ones *via* this one.
+                            // But we should continue checking just in case? 
+                            // Optimization: if no overlap, we can stop because subsequent clips are even further away.
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Also handle startTime change for drag-move ripple (reordering)
+            if (changes.startTime !== undefined && changes.startTime !== oldClip.startTime) {
+                // Get indices of all clips on this track, sorted by startTime
+                // Prioritize the target clip (the one being moved) if start times are equal to allow reordering
+                const trackId = updatedClip.trackId;
+                const trackClipsIndices = newClips
+                    .map((c, index) => ({ c, index }))
+                    .filter(item => item.c.trackId === trackId)
+                    .sort((a, b) => {
+                        const diff = a.c.startTime - b.c.startTime;
+                        if (Math.abs(diff) < 0.01) { // Treat very close times as equal
+                            if (a.c.id === id) return -1; // Target comes first
+                            if (b.c.id === id) return 1;
+                        }
+                        return diff;
+                    });
+
+                // Find where our target clip is in this sorted list
+                const sortedTargetIndex = trackClipsIndices.findIndex(item => item.c.id === id);
+
+                // We need to check collisions against ALL other clips, not just subsequent ones in the old order,
+                // because moving a clip might make it collide with a previous clip or a later clip.
+                // However, the requirement is "switching after automatic backward shift" (ripple push).
+                // Simple approach: Sort by start time. Iterate. If overlap, push next one.
+
+                for (let i = 0; i < trackClipsIndices.length - 1; i++) {
+                    const currentItem = trackClipsIndices[i];
+                    const nextItem = trackClipsIndices[i + 1];
+
+                    const currentClip = newClips[currentItem.index];
+                    const nextClip = newClips[nextItem.index];
+
+                    const currentEndTime = currentClip.startTime + currentClip.duration;
+
+                    // If overlap
+                    if (currentEndTime > nextClip.startTime) {
+                        // Shift next clip
+                        newClips[nextItem.index] = {
+                            ...nextClip,
+                            startTime: currentEndTime
+                        };
+                    }
+                }
+            }
+
+            // Recalculate total duration based on the new clip positions
+            const maxEndTime = Math.max(...newClips.map(c => c.startTime + c.duration));
+
+            return {
+                ...state,
+                clips: newClips,
+                // Ensure duration accommodates all clips, but doesn't necessarily shrink below previous duration 
+                // (unless we want to allow shrinking? let's keep it monotonic for now or just maxEndTime)
+                duration: Math.max(state.duration, maxEndTime)
+            };
+        }
+        case 'RESTORE_CLIPS': {
+            return {
+                ...state,
+                clips: action.payload
+            };
+        }
+        case 'DELETE_CLIP':
+            return {
+                ...state,
+                clips: state.clips.filter(clip => clip.id !== action.payload),
+                selectedClipId: state.selectedClipId === action.payload ? null : state.selectedClipId
+            };
+        case 'SET_GENERATING':
+            return {
+                ...state,
+                clips: state.clips.map(clip =>
+                    clip.id === action.payload.id ? { ...clip, isGenerating: action.payload.isGenerating } : clip
+                )
+            };
+        default:
+            return state;
+    }
+}
+
+const EditorContext = createContext<{
+    state: EditorState;
+    dispatch: React.Dispatch<Action>;
+} | null>(null);
+
+export function EditorProvider({ children }: { children: ReactNode }) {
+    const [state, dispatch] = useReducer(editorReducer, initialState);
+
+    return (
+        <EditorContext.Provider value={{ state, dispatch }}>
+            {children}
+        </EditorContext.Provider>
+    );
+}
+
+export function useEditor() {
+    const context = useContext(EditorContext);
+    if (!context) throw new Error('useEditor must be used within EditorProvider');
+    return context;
+}

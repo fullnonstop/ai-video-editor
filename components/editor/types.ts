@@ -11,6 +11,8 @@ export interface Clip {
     prompt?: string;
     extensionStart?: number; // Time where the "extension" visual effect begins
     thumbnail?: string;
+    isPendingConfirmation?: boolean;
+    lastGenerationMode?: 'regenerate' | 'extend'; // Track which mode was used for generation
 }
 
 export interface EditorState {
@@ -29,4 +31,5 @@ export type EditorAction =
     | { type: 'UPDATE_CLIP'; payload: { id: string; changes: Partial<Clip> } }
     | { type: 'SET_GENERATING'; payload: { id: string; isGenerating: boolean } }
     | { type: 'RESTORE_CLIPS'; payload: Clip[] }
-    | { type: 'DELETE_CLIP'; payload: string };
+    | { type: 'DELETE_CLIP'; payload: string }
+    | { type: 'ADD_CLIP'; payload: Clip };

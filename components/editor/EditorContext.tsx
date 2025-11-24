@@ -7,27 +7,11 @@ type Action = EditorAction;
 
 const initialState: EditorState = {
     currentTime: 0,
-    duration: 40, // 10 clips * 4s
+    duration: 120, // 2 minutes default
     isPlaying: false,
     selectedClipId: null,
     zoom: 50, // 50px per second
     clips: [
-        {
-            id: 'sub-1',
-            trackId: 'subtitle',
-            startTime: 0,
-            duration: 5,
-            originalDuration: 10,
-            content: '傍晚客厅，窗帘半拉，夕阳透过缝隙洒在沙发上，猫咪蜷缩在沙发角落在打盹...'
-        },
-        {
-            id: 'sub-2',
-            trackId: 'subtitle',
-            startTime: 5,
-            duration: 5,
-            originalDuration: 10,
-            content: '傍晚客厅，窗帘半拉，夕阳透过缝隙洒在沙发上，猫咪蜷缩在沙发角落在打盹...'
-        },
         // Generate video clips from imported files with Istanbul history prompts
         ...Array.from({ length: 10 }).map((_, i) => {
             const prompts = [
@@ -42,16 +26,41 @@ const initialState: EditorState = {
                 "古老的城墙遗址，见证了拜占庭和奥斯曼帝国的兴衰，爬山虎在墙缝中生长。",
                 "夜晚的伊斯坦布尔，灯火辉煌，清真寺的宣礼塔在夜空中轮廓分明。"
             ];
-            return {
-                id: `vid-${i + 1}`,
-                trackId: 'video' as const,
-                startTime: i * 4, // 4 seconds each
-                duration: 4,
-                originalDuration: 10, // Assume 10s source
-                content: `/videos/${i + 1}.mp4`,
-                prompt: prompts[i]
-            };
-        })
+
+            const voiceovers = [
+                "公元前667年，来自麦加拉的希腊殖民者在此建立拜占庭，开启了这座城市千年的传奇。",
+                "330年，君士坦丁大帝迁都于此，更名为君士坦丁堡，成为罗马帝国的新中心。",
+                "查士丁尼大帝时期，圣索菲亚大教堂建成，象征着拜占庭帝国建筑艺术的巅峰。",
+                "1204年，第四次十字军东征攻陷君士坦丁堡，城市遭到洗劫，帝国元气大伤。",
+                "1453年，奥斯曼苏丹穆罕默德二世攻占君士坦丁堡，拜占庭帝国灭亡，城市更名为伊斯坦布尔。",
+                "苏莱曼大帝统治时期，奥斯曼帝国达到鼎盛，伊斯坦布尔成为伊斯兰世界的文化中心。",
+                "19世纪，奥斯曼帝国推行坦志麦特改革，伊斯坦布尔开始呈现出东西方交融的近代化风貌。",
+                "1923年，土耳其共和国成立，首都迁往安卡拉，但伊斯坦布尔依然是土耳其的经济和文化心脏。",
+                "如今的伊斯坦布尔，横跨欧亚两洲，是世界上唯一一座跨越两个大洲的国际大都市。",
+                "历史的厚重与现代的活力在这里交织，伊斯坦布尔永远诉说着文明的故事。"
+            ];
+
+            return [
+                {
+                    id: `vid-${i + 1}`,
+                    trackId: 'video' as const,
+                    startTime: i * 4, // 4 seconds each
+                    duration: 4,
+                    originalDuration: 10, // Assume 10s source
+                    content: `/videos/${i + 1}.mp4`,
+                    prompt: prompts[i]
+                },
+                {
+                    id: `sub-${i + 1}`,
+                    trackId: 'subtitle' as const,
+                    startTime: i * 4,
+                    duration: 4,
+                    originalDuration: 4,
+                    content: voiceovers[i],
+                    prompt: voiceovers[i] // Use content as prompt for now
+                }
+            ];
+        }).flat()
     ]
 };
 
@@ -183,6 +192,13 @@ function editorReducer(state: EditorState, action: Action): EditorState {
                 ...state,
                 clips: state.clips.filter(clip => clip.id !== action.payload),
                 selectedClipId: state.selectedClipId === action.payload ? null : state.selectedClipId
+            };
+        case 'ADD_CLIP':
+            return {
+                ...state,
+                clips: [...state.clips, action.payload],
+                selectedClipId: action.payload.id,
+                duration: Math.max(state.duration, action.payload.startTime + action.payload.duration)
             };
         case 'SET_GENERATING':
             return {

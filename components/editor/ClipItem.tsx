@@ -49,6 +49,9 @@ export function ClipItem({ clip }: ClipItemProps) {
         const deltaSeconds = deltaX / zoom;
         let newStartTime = initialStartTime.current + deltaSeconds;
 
+        // Snap to 0.1s
+        newStartTime = Math.round(newStartTime * 10) / 10;
+
         // Constraint: cannot go below 0
         newStartTime = Math.max(0, newStartTime);
 
@@ -74,6 +77,9 @@ export function ClipItem({ clip }: ClipItemProps) {
         const deltaSeconds = deltaX / zoom;
 
         let newDuration = initialDuration.current + deltaSeconds;
+
+        // Snap to 0.1s
+        newDuration = Math.round(newDuration * 10) / 10;
 
         // Constraints
         // 1. Min duration (e.g. 0.5s)
@@ -188,6 +194,15 @@ export function ClipItem({ clip }: ClipItemProps) {
                         {/* Progress bar mock */}
                         <div className="absolute bottom-0 left-0 right-0 h-1 bg-neutral-700">
                             <div className="h-full bg-primary w-1/2 animate-pulse"></div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Pending Confirmation Overlay */}
+                {clip.isPendingConfirmation && !clip.isGenerating && (
+                    <div className="absolute inset-0 bg-primary/20 border-2 border-primary flex items-center justify-center z-30 animate-in fade-in duration-300">
+                        <div className="bg-primary text-black text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg">
+                            待确认
                         </div>
                     </div>
                 )}
